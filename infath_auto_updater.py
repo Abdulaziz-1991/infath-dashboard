@@ -158,13 +158,14 @@ def _mobasher_enrich(driver, auc: Auction):
         log.debug(f"[مباشر] لا روابط أصول لمزاد {auc.id}")
         return
     sold, total = 0, 0
-    for item_id in item_ids[:auc.assets]:  # لا نتجاوز عدد الأصول المعلن
+    for item_id in item_ids[:auc.assets]:
         try:
             item_txt = _page_text(driver, f"https://mobasher.sa/auctions/t-details/{item_id}", wait=4)
             # "أعلى مزايدة اونلاين  3,290,000 ر.س" أو "سعر الربح  3,290,000 ر.س"
-            bid = _p(re.search(r'(?:أعلى مزايدة اونلاين|سعر الربح)\s+([\d,]+)', item_txt, re.IGNORECASE)
-                     or re.search(r'([\d,]{5,})\s*ر\.?س', item_txt))
-            if bid and bid > 0:
+            m1 = re.search(r'(?:أعلى مزايدة اونلاين|سعر الربح)\s+([\d,]+)', item_txt, re.IGNORECASE)
+            m2 = re.search(r'([\d,]+)\s*ر\.?س', item_txt) if not m1 else None
+            bid = _p((m1 or m2).group(1)) if (m1 or m2) else 0
+            if bid > 100_000:   # حد أدنى منطقي: 100 ألف ريال
                 sold += 1; total += bid
         except Exception as e:
             log.debug(f"[مباشر] item {item_id}: {e}")
@@ -306,20 +307,70 @@ def fetch_saudia(driver=None):
 
 
 def _saudia_enrich(driver, auc: Auction):
-    """يحاول استخراج بيانات مزايدات مزاد السعودية من صفحة تفاصيله"""
-    txt = _page_text(driver, auc.detail_link, wait=6)
-    # "أعلى سومة: 1,500,000" أو "أعلى مزايدة: X"
-    bids = [_p(v) for v in re.findall(r'(?:أعلى سومة|أعلى مزايدة)\s*:?\s*([\d,]+)', txt)]
-    if not bids:
-        # بحث في page source عن last_bid_price
-        bids = [_p(v) for v in re.findall(r'"last_bid_price"\s*:\s*(\d+)', driver.page_source)]
-    sold  = sum(1 for b in bids if b > 0)
-    total = sum(b for b in bids if b > 0)
-    if sold > 0:
-        auc.sold_assets = sold; auc.total_value = total
-        log.info(f"[السعودية] ✓ {auc.name[:25]}: {sold} مباع | {total:,} ر.س")
-    else:
-        log.info(f"[السعودية] ℹ {auc.name[:25]}: لا بيانات مزايدات ظاهرة")
+    """
+    يستخرج بيانات مزايدات مزاد السعودية.
+    يتنقل داخل React SPA على auctions.com.sa مباشرة
+    (oe.auctions.com.sa محجوب CORS، لكن SPA يعرض البيانات بعد التحميل)
+    """
+    # انتقل لصفحة قائمة المزادات ثم اجلب البيانات من API المحلي
+    try:
+        # السعودية SPA: انتقل للصفحة الرئيسية أولاً ثم اجلب البيانات من API الداخلي
+        driver.get("https://auctions.com.sa/auctions_filter")
+        time.sleep(3)
+        # استدعاء API الداخلي مباشرة من المتصفح (يعمل مع session cookies)
+        script = f"""
+            const r = await fetch('/web/dataset/call_kw/auction.lot/search_read', {{
+                method: 'POST',
+                headers: {{'Content-Type': 'application/json'}},
+                body: JSON.stringify({{
+                    jsonrpc: '2.0', method: 'call', id: 1,
+                    params: {{
+                        model: 'auction.lot', method: 'search_read',
+                        args: [[['auction_id', '=', {auc.id}]]],
+                        kwargs: {{
+                            fields: ['name', 'min_bid', 'last_bid_price', 'lot_status', 'bid_count'],
+                            limit: 50
+                        }}
+                    }}
+                }})
+            }});
+            const d = await r.json();
+            return JSON.stringify(d.result || []);
+        """
+        result = driver.execute_async_script(
+            "const cb = arguments[arguments.length-1];"
+            + script.replace("return ", "cb(")
+            + ");"
+        )
+        if result:
+            lots = json.loads(result) if isinstance(result, str) else result
+            if lots and isinstance(lots, list):
+                sold  = sum(1 for l in lots if _p(l.get("last_bid_price")) > 0)
+                total = sum(_p(l.get("last_bid_price")) for l in lots)
+                if sold > 0:
+                    auc.sold_assets = sold; auc.total_value = total
+                    log.info(f"[السعودية] ✓ {auc.name[:25]}: {sold} مباع | {total:,} ر.س")
+                    return
+    except Exception as e:
+        log.debug(f"[السعودية] Odoo API: {e}")
+
+    # fallback: Selenium ينتقل للصفحة ويقرأ نصها
+    try:
+        driver.get(f"https://auctions.com.sa/ar/#/auction/{auc.id}")
+        time.sleep(6)
+        txt = driver.find_element("tag name", "body").text or ""
+        bids = [_p(v) for v in re.findall(r'(?:أعلى سومة|أعلى مزايدة)\s*:?\s*([\d,]+)', txt)]
+        if not bids:
+            bids = [_p(v) for v in re.findall(r'"last_bid_price"\s*:\s*(\d+)', driver.page_source)]
+        sold  = sum(1 for b in bids if b > 100_000)
+        total = sum(b for b in bids if b > 100_000)
+        if sold > 0:
+            auc.sold_assets = sold; auc.total_value = total
+            log.info(f"[السعودية] ✓ {auc.name[:25]}: {sold} مباع | {total:,} ر.س")
+        else:
+            log.info(f"[السعودية] ℹ {auc.name[:25]}: لا بيانات مزايدات ظاهرة")
+    except Exception as e:
+        log.debug(f"[السعودية] fallback: {e}")
 
 
 # ══════════════════════════════════════════════════════════════

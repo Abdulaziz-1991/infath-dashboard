@@ -302,42 +302,92 @@ function snapshot(list){
   return m;
 }
 
-// ─── آخر التحديثات: مقارنة اللقطة الحالية بالسابقة ───
+// ─── آخر التحديثات: تغذية حيّة وتفاعلية ───
 function buildFeed(data){
-  const events=[];
+  const events = [];
+  const now    = new Date();
+
+  // 1) مزادات منتهية مع قيمها (الأهم أولاً)
+  (data.ended||[]).forEach(a=>{
+    const p = pMap[a.platform];
+    if(a.totalValue > 0){
+      events.push({
+        tag:'🏁', c:'#059669',
+        msg:`انتهى: <strong>${a.name}</strong>`,
+        sub:`${fmt(a.soldAssets)} أصل مباع | ${fmtM(a.totalValue)}`,
+        p: p?.name||a.platform, link: a.link, pri: 1
+      });
+    } else {
+      events.push({
+        tag:'🔔', c:'#9ca3af',
+        msg:`انتهى: ${a.name}`,
+        sub:`${fmt(a.totalAssets)} أصل`,
+        p: p?.name||a.platform, link: a.link, pri: 3
+      });
+    }
+  });
+
+  // 2) مزادات جارية تنتهي خلال أقل من ساعتين
+  const live = AUCTIONS.filter(a=>a.status==='live'&&a.endISO);
+  live.forEach(a=>{
+    try{
+      const end  = new Date(a.endISO);
+      const diff = (end - now) / 60000; // بالدقائق
+      if(diff > 0 && diff <= 120){
+        const p = pMap[a.platform];
+        const hm = diff>=60 ? `${Math.floor(diff/60)}س ${Math.round(diff%60)}د` : `${Math.round(diff)}د`;
+        events.push({
+          tag:'⏱', c:'#dc2626',
+          msg:`<strong>ينتهي قريباً</strong> — ${a.name}`,
+          sub:`يغلق خلال ${hm} | ${fmt(a.totalAssets)} أصل`,
+          p: p?.name||a.platform, link: a.link, pri: 0
+        });
+      } else if(diff > 120 && diff <= 1440){
+        const p = pMap[a.platform];
+        events.push({
+          tag:'🔴', c:'#1d4ed8',
+          msg:`جارٍ الآن: ${a.name}`,
+          sub:`${fmt(a.totalAssets)} أصل`,
+          p: p?.name||a.platform, link: a.link, pri: 2
+        });
+      }
+    }catch(e){}
+  });
+
+  // 3) مزادات جديدة رُصدت منذ آخر تحديث
   if(prevSnapshot){
     AUCTIONS.forEach(a=>{
-      const key=a.platform+'-'+a.id;
-      const prev=prevSnapshot[key];
-      const p=pMap[a.platform];
+      const key  = a.platform+'-'+a.id;
+      const prev = prevSnapshot[key];
+      const p    = pMap[a.platform];
       if(!prev){
-        events.push({msg:`مزاد جديد رُصد: ${a.name}`, c:p?.color||'#6b7280', p:p?.name||a.platform, link:a.link});
-      }else if(prev.status!==a.status){
-        const lbl=a.status==='live'?'بدأ الآن':(a.status==='soon'?'أصبح قادماً':a.status);
-        events.push({msg:`${a.name} — ${lbl}`, c:p?.color||'#6b7280', p:p?.name||a.platform, link:a.link});
-      }else if(prev.totalAssets!==a.totalAssets){
-        events.push({msg:`${a.name} — تحديث عدد الأصول إلى ${fmt(a.totalAssets)}`, c:p?.color||'#6b7280', p:p?.name||a.platform, link:a.link});
+        events.push({
+          tag:'🆕', c: p?.color||'#6b7280',
+          msg:`مزاد جديد رُصد: ${a.name}`,
+          sub:`${fmt(a.totalAssets)} أصل`,
+          p: p?.name||a.platform, link: a.link, pri: 2
+        });
       }
     });
   }
-  (data.ended||[]).forEach(a=>{
-    const p=pMap[a.platform];
-    events.push({msg:`انتهى: ${a.name}`, c:'#9ca3af', p:p?.name||a.platform, link:a.link});
-  });
-  renderFeed(events.slice(0,8));
+
+  // رتّب حسب الأولوية (0=أعجل) ثم اعرض أول 10
+  events.sort((a,b)=>(a.pri||5)-(b.pri||5));
+  renderFeed(events.slice(0,10));
 }
 
 function renderFeed(events){
-  const el=document.getElementById('feed');
+  const el = document.getElementById('feed');
   if(!events.length){
-    el.innerHTML='<div class="feed-empty">لا تغييرات منذ آخر تحديث</div>';
+    el.innerHTML='<div class="feed-empty">لا تغييرات — التحديث التالي خلال دقائق</div>';
     return;
   }
   el.innerHTML=events.map(e=>`
     <div class="feed-item">
       <div class="feed-dot" style="background:${e.c}"></div>
       <div style="flex:1">
-        <div style="font-size:11px;color:#374151">${e.msg}</div>
+        <div style="font-size:11px;color:#374151">${e.tag} ${e.msg}</div>
+        ${e.sub?`<div style="font-size:10px;color:#6b7280;margin-top:1px">${e.sub}</div>`:''}
         <div style="display:flex;align-items:center;gap:8px;margin-top:2px">
           <span style="font-size:10px;color:#9ca3af">${e.p}</span>
           ${e.link?`<a class="feed-link" href="${e.link}" target="_blank">↗ فتح</a>`:''}

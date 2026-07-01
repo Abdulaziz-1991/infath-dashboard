@@ -194,7 +194,7 @@ def fetch_wasalt():
             id=str(a.get("id")),
             platform="wasalt",
             name=name,
-            city=(a.get("address") or "").split(",")[0],
+            city=(lambda addr: (addr[0] if isinstance(addr, list) else addr or "").split(",")[0])(a.get("address") or ""),
             status=st,
             assets=len(a.get("auctionItems") or []),
             start=(a.get("startDate") or "")[:10],

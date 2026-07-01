@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>متابعة المزادات — إنفاذ</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'IBM Plex Sans Arabic',sans-serif;background:#f5f6fa;color:#1e2939;direction:rtl;min-height:100vh}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:#f0f0f0}::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:4px}
+
+.hdr{background:#fff;border-bottom:1px solid #e5e7eb;padding:10px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.hdr-brand{display:flex;align-items:center;gap:12px}
+.hdr-divider{width:1px;height:30px;background:#e5e7eb}
+.hdr-text .title{font-size:14px;font-weight:700;color:#111827}
+.hdr-text .sub{font-size:10px;color:#6b7280;margin-top:1px}
+.live-pill{display:flex;align-items:center;gap:5px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:20px;padding:3px 11px;font-size:11px;color:#059669;font-weight:600}
+.live-dot{width:6px;height:6px;border-radius:50%;background:#10b981;animation:pulse 2s infinite}
+.data-badge{background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer}
+.err-badge{background:#fef2f2;color:#dc2626;border:1px solid #fecaca;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600}
+
+.main{padding:18px 24px;display:flex;flex-direction:column;gap:16px}
+
+/* KPI */
+.kpi-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.kpi{background:#fff;border:1px solid #e5e7eb;border-radius:11px;padding:14px 16px;position:relative;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.kpi-bar{position:absolute;top:0;right:0;width:3px;height:100%}
+.kpi-label{font-size:11px;color:#6b7280;margin-bottom:7px;font-weight:500}
+.kpi-val{font-size:25px;font-weight:700;line-height:1}
+.kpi-sub{font-size:10px;color:#9ca3af;margin-top:3px}
+
+/* TOP ROW */
+.top-row{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px}
+
+/* CARD */
+.card{background:#fff;border:1px solid #e5e7eb;border-radius:11px;padding:14px 16px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.card-title{font-size:12px;font-weight:700;color:#111827;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:6px}
+.cbadge{font-size:9px;font-weight:600;border-radius:5px;padding:2px 7px;white-space:nowrap}
+.cb-blue{background:#eff6ff;color:#1d4ed8}
+.cb-green{background:#ecfdf5;color:#059669}
+.cb-red{background:#fef2f2;color:#dc2626}
+.cb-amber{background:#fffbeb;color:#d97706}
+.cb-gray{background:#f3f4f6;color:#6b7280}
+
+/* PLATFORMS TABLE */
+.ptable{width:100%;border-collapse:collapse}
+.ptable th{font-size:10px;color:#9ca3af;font-weight:500;text-align:right;padding:0 5px 8px;border-bottom:1px solid #f3f4f6}
+.ptable td{padding:7px 5px;border-bottom:1px solid #f9fafb;font-size:11px;vertical-align:middle}
+.pdot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-left:5px}
+
+/* ENDED + CLOSING TABLES */
+.etable{width:100%;border-collapse:collapse}
+.etable th{font-size:10px;color:#9ca3af;font-weight:500;text-align:right;padding:0 6px 8px;border-bottom:1px solid #f3f4f6;white-space:nowrap}
+.etable td{padding:8px 6px;border-bottom:1px solid #f9fafb;font-size:11px;vertical-align:middle}
+
+/* DONUT */
+.donut-wrap{display:flex;align-items:center;justify-content:center;gap:12px}
+.legend{display:flex;flex-direction:column;gap:7px;flex:1}
+.legend-row{display:flex;align-items:center;gap:6px;font-size:10px;color:#374151}
+.legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+
+/* FEED */
+.feed-item{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #f3f4f6}
+.feed-dot{width:6px;height:6px;border-radius:50%;margin-top:4px;flex-shrink:0}
+.feed-link{font-size:10px;color:#1d4ed8;text-decoration:none;font-weight:600;display:inline-block;margin-top:2px}
+.feed-link:hover{text-decoration:underline}
+.feed-empty{font-size:11px;color:#9ca3af;padding:8px 0}
+
+/* FILTER BAR */
+.filter-bar{display:flex;gap:5px;margin-bottom:10px;align-items:center;flex-wrap:wrap}
+.fbtn{font-family:inherit;font-size:11px;font-weight:500;border-radius:6px;padding:4px 10px;cursor:pointer;border:1px solid #e5e7eb;background:#fff;color:#6b7280;transition:.15s;white-space:nowrap}
+.fbtn.active{background:#1d4ed8;border-color:#1d4ed8;color:#fff}
+.fbtn:hover:not(.active){border-color:#1d4ed8;color:#1d4ed8}
+.srch{font-family:inherit;font-size:11px;background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:4px 10px;color:#374151;outline:none;width:180px}
+.srch::placeholder{color:#d1d5db}
+.filter-hint{font-size:10px;color:#9ca3af;margin-bottom:8px}
+
+/* AUCTION LIST */
+.auc-list{display:flex;flex-direction:column;gap:5px}
+.auc-item{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:10px 13px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;transition:.15s}
+.auc-item:hover,.auc-item.sel{border-color:#1d4ed8;background:#f8faff}
+.auc-platform{font-size:9px;font-weight:600;border-radius:4px;padding:2px 6px}
+.auc-name{font-size:12px;font-weight:600;margin:2px 0;color:#111827}
+.auc-meta{font-size:10px;color:#9ca3af}
+.auc-right{display:flex;gap:12px;align-items:center;flex-shrink:0}
+.astat{text-align:center;min-width:36px}
+.astat-val{font-size:12px;font-weight:700}
+.astat-lbl{font-size:9px;color:#9ca3af}
+.sbadge{font-size:10px;font-weight:600;border-radius:5px;padding:2px 8px;white-space:nowrap}
+.sb-live{background:#ecfdf5;color:#059669}
+.sb-soon{background:#eff6ff;color:#1d4ed8}
+.sb-today{background:#fff7ed;color:#c2410c}
+
+/* DETAIL */
+.detail{background:#fff;border:1px solid #e5e7eb;border-radius:11px;padding:14px 16px;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.sum-row{display:flex;gap:16px;flex-wrap:wrap;background:#f9fafb;border:1px solid #f3f4f6;border-radius:7px;padding:10px 13px;margin:8px 0}
+.srow-item{display:flex;flex-direction:column;gap:2px}
+.srow-lbl{font-size:10px;color:#9ca3af}
+.srow-val{font-size:13px;font-weight:700;color:#111827}
+.close-btn{background:transparent;border:none;color:#9ca3af;cursor:pointer;font-size:16px}
+.open-link-btn{display:inline-block;margin-top:4px;background:#1d4ed8;color:#fff;text-decoration:none;font-size:11px;font-weight:600;border-radius:6px;padding:6px 14px}
+
+.notice-bar{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 14px;font-size:11px;color:#92400e;display:flex;align-items:center;gap:8px}
+
+@media(max-width:1100px){.top-row{grid-template-columns:1fr 1fr}}
+@media(max-width:700px){.kpi-row{grid-template-columns:repeat(2,1fr)}.top-row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="hdr-brand">
+    <svg width="80" height="34" viewBox="0 0 120 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="120" height="40" rx="6" fill="#0d6e4e"/>
+      <text x="60" y="26" text-anchor="middle" fill="white" font-size="18" font-weight="700" font-family="IBM Plex Sans Arabic">إنفاذ</text>
+    </svg>
+    <div class="hdr-divider"></div>
+    <div class="hdr-text">
+      <div class="title">متابعة المزادات</div>
+      <div class="sub">تستعرض المزادات الجارية والقادمة والمنتهية خلال 24 ساعة</div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <div class="live-pill"><div class="live-dot"></div>مباشر</div>
+    <div class="data-badge" id="dataBadge" onclick="loadData()">⏳ جارِ التحميل...</div>
+  </div>
+</div>
+
+<div class="main" id="mainApp" style="display:none">
+
+  <!-- KPIs -->
+  <div class="kpi-row">
+    <div class="kpi"><div class="kpi-bar" style="background:#1d4ed8"></div>
+      <div class="kpi-label">إجمالي المزادات المرصودة</div>
+      <div class="kpi-val" style="color:#1d4ed8" id="k1">—</div>
+      <div class="kpi-sub" id="k1s">— جارٍ · — قادم</div>
+    </div>
+    <div class="kpi"><div class="kpi-bar" style="background:#059669"></div>
+      <div class="kpi-label">إجمالي الأصول المطروحة</div>
+      <div class="kpi-val" style="color:#059669" id="k2">—</div>
+      <div class="kpi-sub">أصل في المزادات الجارية والقادمة</div>
+    </div>
+    <div class="kpi"><div class="kpi-bar" style="background:#d97706"></div>
+      <div class="kpi-label">مزادات تنتهي اليوم</div>
+      <div class="kpi-val" style="color:#d97706" id="k3">—</div>
+      <div class="kpi-sub" id="k3s">من المزادات الجارية حالياً</div>
+    </div>
+  </div>
+
+  <!-- TOP ROW -->
+  <div class="top-row">
+
+    <!-- المنتهية خلال 24 ساعة -->
+    <div class="card">
+      <div class="card-title">المنتهية خلال 24 ساعة <span class="cbadge cb-red" id="endedCount">—</span></div>
+      <table class="etable">
+        <thead><tr><th>المزاد</th><th>الأصول</th><th>وقت الانتهاء</th></tr></thead>
+        <tbody id="endedBody"></tbody>
+      </table>
+    </div>
+
+    <!-- ستنتهي اليوم -->
+    <div class="card">
+      <div class="card-title">تنتهي اليوم <span class="cbadge cb-amber" id="closingCount">—</span></div>
+      <table class="etable">
+        <thead><tr><th>المزاد</th><th>الأصول</th><th>الإغلاق</th></tr></thead>
+        <tbody id="closingBody"></tbody>
+      </table>
+    </div>
+
+    <!-- توزيع الأصول -->
+    <div class="card">
+      <div class="card-title">توزيع الأصول بالمنصات</div>
+      <div id="donut" class="donut-wrap"></div>
+    </div>
+
+    <!-- آخر التحديثات -->
+    <div class="card">
+      <div class="card-title">آخر التحديثات <span class="cbadge cb-green">منذ آخر تحديث</span></div>
+      <div id="feed"></div>
+    </div>
+
+  </div>
+
+  <!-- أداء المنصات - جارية فقط -->
+  <div class="card">
+    <div class="card-title">
+      أداء المنصات — المزادات الجارية حالياً
+      <span class="cbadge cb-blue">6 منصات</span>
+    </div>
+    <table class="ptable">
+      <thead><tr><th>المنصة</th><th>مزادات جارية</th><th>مزادات قادمة</th><th>أصول</th></tr></thead>
+      <tbody id="platBody"></tbody>
+    </table>
+  </div>
+
+  <!-- قائمة المزادات -->
+  <div class="card">
+    <div class="card-title">قائمة المزادات <span class="cbadge cb-blue" id="aucCount">—</span></div>
+    <div class="filter-bar">
+      <button class="fbtn active" onclick="setF('all',this)">الكل</button>
+      <button class="fbtn" onclick="setF('live',this)">جارية</button>
+      <button class="fbtn" onclick="setF('soon',this)">قادمة</button>
+      <button class="fbtn" onclick="setF('today',this)">تنتهي اليوم</button>
+      <input class="srch" id="srch" placeholder="🔍 بحث بالاسم أو المدينة..." oninput="renderList()">
+    </div>
+    <div class="filter-hint">💡 اضغط على أي مزاد لعرض تفاصيله وفتحه في منصته الأصلية</div>
+    <div class="auc-list" id="aucList"></div>
+  </div>
+
+  <!-- تفاصيل المزاد -->
+  <div class="detail" id="detPanel" style="display:none">
+    <div class="card-title"><span id="detTitle"></span><button class="close-btn" onclick="closeDetail()">✕</button></div>
+    <div class="sum-row" id="detSum"></div>
+    <a id="detLink" class="open-link-btn" href="#" target="_blank">↗ فتح في المنصة الأصلية</a>
+  </div>
+
+</div>
+
+<div class="main" id="loadErr" style="display:none">
+  <div class="notice-bar">
+    ⚠️ تعذّر تحميل ملف البيانات <code>infath_data.json</code>. تأكد أنه موجود بجانب هذا الملف على نفس الخادم،
+    وأنك شغّلت <code>infath_auto_updater.py</code> مرة واحدة على الأقل لإنشائه.
+    <span style="margin-right:auto;cursor:pointer;text-decoration:underline" onclick="loadData()">إعادة المحاولة</span>
+  </div>
+</div>
+
+<script>
+const PLATFORM_FALLBACK = [
+  {id:"wasalt",   name:"وصلت للمزادات",     color:"#7c3aed"},
+  {id:"mobasher", name:"مباشر للمزادات",     color:"#1d4ed8"},
+  {id:"aldal",    name:"الدال للمزادات",     color:"#0891b2"},
+  {id:"dar",      name:"دار المزادات",       color:"#d97706"},
+  {id:"saudia",   name:"السعودية للمزادات", color:"#059669"},
+  {id:"soum",     name:"سومتك",              color:"#dc2626"},
+];
+
+const REFRESH_MS = 60000;       // إعادة الجلب كل 60 ثانية
+const DATA_URL = "infath_data.json";
+
+let PLATFORMS = PLATFORM_FALLBACK;
+let pMap = Object.fromEntries(PLATFORMS.map(p=>[p.id,p]));
+let AUCTIONS = [];
+let ENDED_AUCTIONS = [];
+let prevSnapshot = null;        // للمقارنة وتوليد "آخر التحديثات"
+let fs = 'all', selId = null;
+
+function fmt(n){if(n===null||n===undefined||n==='')return'—';return Number(n).toLocaleString('ar-EG');}
+function todayKSA(){
+  const d=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Riyadh'}));
+  return d.toISOString().slice(0,10);
+}
+function isToday(endISO){
+  if(!endISO) return false;
+  try{
+    const d=new Date(new Date(endISO).toLocaleString('en-US',{timeZone:'Asia/Riyadh'}));
+    return d.toISOString().slice(0,10)===todayKSA();
+  }catch(e){return false;}
+}
+
+// ─── تحميل البيانات عبر fetch محلي ───
+async function loadData(){
+  document.getElementById('dataBadge').textContent='⏳ جارِ التحميل...';
+  document.getElementById('dataBadge').className='data-badge';
+  try{
+    const res = await fetch(DATA_URL + '?t=' + Date.now()); // كسر الكاش لضمان أحدث نسخة
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const data = await res.json();
+
+    if(Array.isArray(data.platforms) && data.platforms.length){
+      PLATFORMS = data.platforms;
+      pMap = Object.fromEntries(PLATFORMS.map(p=>[p.id,p]));
+    }
+    AUCTIONS = data.auctions || [];
+    ENDED_AUCTIONS = data.ended || [];
+
+    buildFeed(data);
+    prevSnapshot = snapshot(AUCTIONS);
+
+    document.getElementById('mainApp').style.display='flex';
+    document.getElementById('loadErr').style.display='none';
+    document.getElementById('dataBadge').textContent='✓ آخر تحديث: '+(data.last_updated_label || '—');
+
+    renderAll();
+  }catch(err){
+    console.error('فشل تحميل infath_data.json:', err);
+    document.getElementById('dataBadge').textContent='⚠️ فشل التحميل — إعادة المحاولة';
+    document.getElementById('dataBadge').className='err-badge';
+    if(!AUCTIONS.length){
+      document.getElementById('mainApp').style.display='none';
+      document.getElementById('loadErr').style.display='flex';
+    }
+  }
+}
+
+function snapshot(list){
+  const m={};
+  list.forEach(a=>{m[a.platform+'-'+a.id]={status:a.status, totalAssets:a.totalAssets};});
+  return m;
+}
+
+// ─── آخر التحديثات: مقارنة اللقطة الحالية بالسابقة ───
+function buildFeed(data){
+  const events=[];
+  if(prevSnapshot){
+    AUCTIONS.forEach(a=>{
+      const key=a.platform+'-'+a.id;
+      const prev=prevSnapshot[key];
+      const p=pMap[a.platform];
+      if(!prev){
+        events.push({msg:`مزاد جديد رُصد: ${a.name}`, c:p?.color||'#6b7280', p:p?.name||a.platform, link:a.link});
+      }else if(prev.status!==a.status){
+        const lbl=a.status==='live'?'بدأ الآن':(a.status==='soon'?'أصبح قادماً':a.status);
+        events.push({msg:`${a.name} — ${lbl}`, c:p?.color||'#6b7280', p:p?.name||a.platform, link:a.link});
+      }else if(prev.totalAssets!==a.totalAssets){
+        events.push({msg:`${a.name} — تحديث عدد الأصول إلى ${fmt(a.totalAssets)}`, c:p?.color||'#6b7280', p:p?.name||a.platform, link:a.link});
+      }
+    });
+  }
+  (data.ended||[]).forEach(a=>{
+    const p=pMap[a.platform];
+    events.push({msg:`انتهى: ${a.name}`, c:'#9ca3af', p:p?.name||a.platform, link:a.link});
+  });
+  renderFeed(events.slice(0,8));
+}
+
+function renderFeed(events){
+  const el=document.getElementById('feed');
+  if(!events.length){
+    el.innerHTML='<div class="feed-empty">لا تغييرات منذ آخر تحديث</div>';
+    return;
+  }
+  el.innerHTML=events.map(e=>`
+    <div class="feed-item">
+      <div class="feed-dot" style="background:${e.c}"></div>
+      <div style="flex:1">
+        <div style="font-size:11px;color:#374151">${e.msg}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:2px">
+          <span style="font-size:10px;color:#9ca3af">${e.p}</span>
+          ${e.link?`<a class="feed-link" href="${e.link}" target="_blank">↗ فتح</a>`:''}
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function renderAll(){
+  renderKPIs();
+  renderPlatforms();
+  renderDonut();
+  renderEnded();
+  renderClosing();
+  renderList();
+}
+
+// ─── KPIs ───
+function renderKPIs(){
+  const active=AUCTIONS.filter(a=>a.status==='live'||a.status==='soon');
+  const liveN=active.filter(a=>a.status==='live').length;
+  const soonN=active.filter(a=>a.status==='soon').length;
+  const totalAssets=active.reduce((s,a)=>s+(a.totalAssets||0),0);
+  const closingToday=AUCTIONS.filter(a=>a.status==='live'&&isToday(a.endISO)).length;
+  document.getElementById('k1').textContent=fmt(active.length);
+  document.getElementById('k1s').textContent=liveN+' جارٍ · '+soonN+' قادم';
+  document.getElementById('k2').textContent=fmt(totalAssets);
+  document.getElementById('k3').textContent=fmt(closingToday);
+}
+
+// ─── Platforms — جارية + قادمة ───
+function renderPlatforms(){
+  const live=AUCTIONS.filter(a=>a.status==='live');
+  const soon=AUCTIONS.filter(a=>a.status==='soon');
+  document.getElementById('platBody').innerHTML=PLATFORMS.map(p=>{
+    const l=live.filter(a=>a.platform===p.id);
+    const s=soon.filter(a=>a.platform===p.id);
+    if(!l.length && !s.length) return`<tr><td style="white-space:nowrap"><span class="pdot" style="background:${p.color}"></span><strong style="font-size:11px">${p.name}</strong></td><td colspan="3" style="color:#d1d5db;font-size:10px">لا مزادات مرصودة حالياً</td></tr>`;
+    const ta=l.reduce((s2,a)=>s2+(a.totalAssets||0),0);
+    return`<tr>
+      <td style="white-space:nowrap"><span class="pdot" style="background:${p.color}"></span><strong style="font-size:11px">${p.name}</strong></td>
+      <td><strong>${fmt(l.length)}</strong></td>
+      <td><strong>${fmt(s.length)}</strong></td>
+      <td><strong>${fmt(ta)}</strong></td>
+    </tr>`;
+  }).join('');
+}
+
+// ─── Donut ───
+function renderDonut(){
+  const active=AUCTIONS.filter(a=>a.status==='live'||a.status==='soon');
+  const total=active.reduce((s,a)=>s+(a.totalAssets||0),0)||1;
+  const R=50,r=28,cx=60,cy=60;
+  let start=-Math.PI/2,paths='',legs='';
+  PLATFORMS.forEach(p=>{
+    const ta=active.filter(a=>a.platform===p.id).reduce((s,a)=>s+(a.totalAssets||0),0);
+    if(!ta)return;
+    const angle=ta/total*2*Math.PI;
+    const x1=cx+R*Math.cos(start),y1=cy+R*Math.sin(start);
+    const x2=cx+R*Math.cos(start+angle),y2=cy+R*Math.sin(start+angle);
+    const xi=cx+r*Math.cos(start+angle),yi=cy+r*Math.sin(start+angle);
+    const xj=cx+r*Math.cos(start),yj=cy+r*Math.sin(start);
+    const lg=angle>Math.PI?1:0;
+    paths+=`<path d="M${x1},${y1} A${R},${R} 0 ${lg},1 ${x2},${y2} L${xi},${yi} A${r},${r} 0 ${lg},0 ${xj},${yj} Z" fill="${p.color}" opacity=".85"/>`;
+    legs+=`<div class="legend-row"><div class="legend-dot" style="background:${p.color}"></div><span>${p.name}</span><span style="color:#9ca3af;margin-right:auto;padding-right:4px">${fmt(ta)} (${Math.round(ta/total*100)}%)</span></div>`;
+    start+=angle;
+  });
+  document.getElementById('donut').innerHTML=`
+    <svg width="120" height="120" viewBox="0 0 120 120" style="flex-shrink:0">${paths}
+      <text x="60" y="56" text-anchor="middle" fill="#111827" font-size="15" font-weight="700" font-family="IBM Plex Sans Arabic">${fmt(total)}</text>
+      <text x="60" y="70" text-anchor="middle" fill="#9ca3af" font-size="8" font-family="IBM Plex Sans Arabic">أصل</text>
+    </svg>
+    <div class="legend">${legs}</div>`;
+}
+
+// ─── المنتهية خلال 24 ساعة ───
+function renderEnded(){
+  document.getElementById('endedCount').textContent=ENDED_AUCTIONS.length+' مزادات';
+  document.getElementById('endedBody').innerHTML=ENDED_AUCTIONS.map(a=>{
+    const p=pMap[a.platform];
+    return`<tr>
+      <td>
+        <a href="${a.link||'#'}" target="_blank" style="font-weight:600;font-size:11px;color:#111827;text-decoration:none;display:block">${a.name}</a>
+        <span style="font-size:9px;font-weight:600;background:${p?.color}18;color:${p?.color};border-radius:3px;padding:1px 5px">${p?.name||a.platform}</span>
+      </td>
+      <td style="text-align:center;font-weight:700">${fmt(a.totalAssets)}</td>
+      <td style="text-align:left;font-size:10px;color:#6b7280;white-space:nowrap">${a.endedAt||'—'}</td>
+    </tr>`;
+  }).join('')||'<tr><td colspan="3" style="text-align:center;color:#9ca3af;padding:14px;font-size:11px">لا مزادات منتهية خلال آخر 24 ساعة</td></tr>';
+}
+
+// ─── تنتهي اليوم ───
+function renderClosing(){
+  const closing=AUCTIONS.filter(a=>a.status==='live'&&isToday(a.endISO));
+  document.getElementById('closingCount').textContent=closing.length+' مزادات';
+  document.getElementById('closingBody').innerHTML=closing.map(a=>{
+    const p=pMap[a.platform];
+    const t=a.endISO?new Date(a.endISO).toLocaleTimeString('ar-SA',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Riyadh'}):'—';
+    return`<tr>
+      <td>
+        <a href="${a.link||'#'}" target="_blank" style="font-weight:600;font-size:11px;color:#111827;text-decoration:none;display:block">${a.name}</a>
+        <span style="font-size:9px;font-weight:600;background:${p?.color}18;color:${p?.color};border-radius:3px;padding:1px 5px">${p?.name||a.platform}</span>
+      </td>
+      <td style="text-align:center;font-weight:700">${fmt(a.totalAssets)}</td>
+      <td style="text-align:center;white-space:nowrap;font-size:10px;color:#6b7280;font-weight:600">${t}</td>
+    </tr>`;
+  }).join('')||'<tr><td colspan="3" style="text-align:center;color:#9ca3af;padding:14px;font-size:11px">لا مزادات تنتهي اليوم</td></tr>';
+}
+
+// ─── List ───
+function setF(f,btn){fs=f;document.querySelectorAll('.fbtn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');renderList();}
+
+function renderList(){
+  const q=(document.getElementById('srch').value||'').trim();
+  let list=AUCTIONS.filter(a=>a.status==='live'||a.status==='soon');
+  if(fs==='live')  list=list.filter(a=>a.status==='live');
+  else if(fs==='soon') list=list.filter(a=>a.status==='soon');
+  else if(fs==='today') list=list.filter(a=>a.status==='live'&&isToday(a.endISO));
+  if(q) list=list.filter(a=>(a.name||'').includes(q)||(a.city||'').includes(q)||(pMap[a.platform]?.name||'').includes(q));
+  document.getElementById('aucCount').textContent=list.length+' مزاد';
+  document.getElementById('aucList').innerHTML=list.map(a=>{
+    const p=pMap[a.platform];
+    const today=a.status==='live'&&isToday(a.endISO);
+    const sb=a.status==='live'
+      ?`<span class="sbadge sb-live">● جاري</span>`
+      :`<span class="sbadge sb-soon">قادم</span>`;
+    const todayBadge=today?`<span class="sbadge sb-today">ينتهي اليوم</span>`:'';
+    return`<div class="auc-item${selId===(a.platform+'-'+a.id)?' sel':''}" onclick="toggleDetail('${a.platform}','${a.id}')">
+      <div>
+        <div style="display:flex;align-items:center;gap:5px;margin-bottom:2px">
+          <span class="auc-platform" style="background:${p?.color}18;color:${p?.color}">${p?.name||a.platform}</span>
+          <span style="font-size:9px;color:#d1d5db">${a.id}</span>
+        </div>
+        <div class="auc-name">${a.name}</div>
+        <div class="auc-meta">📍 ${a.city||'—'} · ${fmt(a.totalAssets)} أصل · ${a.start||'—'} ← ${a.end||'—'}</div>
+      </div>
+      <div class="auc-right">
+        <div class="astat"><div class="astat-val" style="color:#1d4ed8">${fmt(a.totalAssets)}</div><div class="astat-lbl">أصل</div></div>
+        ${sb}${todayBadge}
+      </div>
+    </div>`;
+  }).join('')||'<div style="text-align:center;color:#9ca3af;padding:24px;font-size:13px">لا توجد مزادات تطابق الفلتر</div>';
+}
+
+function toggleDetail(platform,id){
+  const key=platform+'-'+id;
+  if(selId===key){closeDetail();return;}
+  selId=key;
+  const a=AUCTIONS.find(x=>x.platform===platform&&String(x.id)===String(id));
+  if(a){renderDetail(a);renderList();}
+}
+
+function renderDetail(a){
+  const p=pMap[a.platform];
+  document.getElementById('detTitle').textContent=`${a.name} — ${a.id} (${p?.name||a.platform})`;
+  document.getElementById('detSum').innerHTML=`
+    <div class="srow-item"><div class="srow-lbl">إجمالي الأصول</div><div class="srow-val" style="color:#1d4ed8">${fmt(a.totalAssets)}</div></div>
+    <div class="srow-item"><div class="srow-lbl">المدينة</div><div class="srow-val">${a.city||'—'}</div></div>
+    <div class="srow-item"><div class="srow-lbl">الحالة</div><div class="srow-val">${a.status==='live'?'جارٍ':'قادم'}</div></div>
+    <div class="srow-item"><div class="srow-lbl">تاريخ المزاد</div><div class="srow-val" style="font-size:11px">${a.start||'—'} ← ${a.end||'—'}</div></div>`;
+  document.getElementById('detLink').href=a.link||'#';
+  const panel=document.getElementById('detPanel');
+  panel.style.display='block';
+  setTimeout(()=>panel.scrollIntoView({behavior:'smooth',block:'nearest'}),50);
+}
+
+function closeDetail(){selId=null;document.getElementById('detPanel').style.display='none';renderList();}
+
+// ─── Init ───
+loadData();
+setInterval(loadData, REFRESH_MS);
+</script>
+</body>
+</html>

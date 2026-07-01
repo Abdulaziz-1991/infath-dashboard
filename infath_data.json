@@ -1,0 +1,31 @@
+{
+  "last_updated": "2026-06-30T12:00:00+03:00",
+  "last_updated_label": "30 يونيو 2026 — 12:00 م",
+  "summary": {
+    "total_live": 4,
+    "total_soon": 3,
+    "total_ended_24h": 2,
+    "total_assets_active": 64
+  },
+  "platforms": [
+    {"id": "wasalt",   "name": "وصلت للمزادات",     "color": "#7c3aed"},
+    {"id": "mobasher", "name": "مباشر للمزادات",     "color": "#1d4ed8"},
+    {"id": "aldal",    "name": "الدال للمزادات",     "color": "#0891b2"},
+    {"id": "dar",      "name": "دار المزادات",       "color": "#d97706"},
+    {"id": "saudia",   "name": "السعودية للمزادات", "color": "#059669"},
+    {"id": "soum",     "name": "سومتك",              "color": "#dc2626"}
+  ],
+  "auctions": [
+    {"id":"925","platform":"wasalt","name":"مزاد ماس جدة","city":"جدة","status":"live","totalAssets":22,"start":"2026-06-22","end":"2026-06-30","endISO":"2026-06-30T18:00:00.000Z","link":"https://auction.wasalt.sa/auction-group/925"},
+    {"id":"4535","platform":"mobasher","name":"مزاد الصفوة","city":"الرياض","status":"live","totalAssets":7,"start":"2026-06-23","end":"2026-06-30","endISO":"2026-06-30T14:20:00.000Z","link":"https://mobasher.sa/auctions/t-container-details/4535"},
+    {"id":"17","platform":"saudia","name":"مزاد عقارات القصيم","city":"بريدة","status":"live","totalAssets":9,"start":"2026-06-24","end":"2026-07-01","endISO":"2026-07-01T15:00:00.000Z","link":"https://auctions.com.sa/auctions_filter"},
+    {"id":"1050","platform":"soum","name":"مزاد أعالي الرياض","city":"الرياض","status":"live","totalAssets":2,"start":"2026-06-20","end":"2026-06-30","endISO":"2026-06-30T20:00:00.000Z","link":"https://soum.tech/auctions/1050/assets"},
+    {"id":"926","platform":"wasalt","name":"مزاد جوهرة الطائف","city":"الطائف","status":"soon","totalAssets":15,"start":"2026-07-02","end":"2026-07-04","endISO":"2026-07-04T18:00:00.000Z","link":"https://auction.wasalt.sa/auction-group/926"},
+    {"id":"4581","platform":"mobasher","name":"مزاد فرائد الشرقية","city":"الدمام","status":"soon","totalAssets":18,"start":"2026-07-01","end":"2026-07-05","endISO":"2026-07-05T14:50:00.000Z","link":"https://mobasher.sa/auctions/t-container-details/4581"},
+    {"id":"454","platform":"aldal","name":"مزاد قمم العاصمة 2","city":"الرياض","status":"soon","totalAssets":9,"start":"2026-07-03","end":"2026-07-06","endISO":"2026-07-06T18:00:00.000Z","link":"https://app.aldalauctions.sa/?tab=coming#auctions"}
+  ],
+  "ended": [
+    {"id":"4600","platform":"mobasher","name":"مزاد الأصول المنقولة — جازان","city":"جازان","totalAssets":12,"endedAt":"30 Jun — 10:00 ص","link":"https://mobasher.sa/auctions/t-container-details/4600"},
+    {"id":"383","platform":"dar","name":"مزاد منقولات الرياض","city":"الرياض","totalAssets":6,"endedAt":"30 Jun — 02:00 ص","link":"https://darauction.com/ar"}
+  ]
+}

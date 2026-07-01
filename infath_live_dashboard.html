@@ -418,7 +418,8 @@ function renderEnded(){
   document.getElementById('endedCount').textContent=ENDED_AUCTIONS.length+' مزادات';
   document.getElementById('endedBody').innerHTML=ENDED_AUCTIONS.map(a=>{
     const p=pMap[a.platform];
-    const hasSoldData = a.soldAssets > 0 || a.totalValue > 0;
+    const hasSoldData = (a.soldAssets||0) > 0;
+    const hasValueData = (a.totalValue||0) > 0;
     const soldPct = a.totalAssets>0 ? Math.round((a.soldAssets||0)/a.totalAssets*100) : 0;
     return`<tr>
       <td>
@@ -434,7 +435,7 @@ function renderEnded(){
           : `<span style="font-size:10px;color:#d1d5db">—</span>`}
       </td>
       <td style="text-align:right">
-        ${a.totalValue
+        ${hasValueData
           ? `<span style="font-weight:700;font-size:11px;color:#1d4ed8">${fmtM(a.totalValue)}</span>`
           : `<span style="font-size:10px;color:#d1d5db">—</span>`}
       </td>

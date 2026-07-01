@@ -686,69 +686,37 @@ def _parse_price(v):
 
 def fetch_mobasher_bids(auction_id: str, auction_data: dict = None):
     """
-    يجلب بيانات المزايدات لمزاد مباشر منتهٍ.
-    يحاول أولاً من البيانات الموجودة في الاستجابة الرئيسية،
-    ثم يجرب عدة مسارات لـ API الأصول.
+    يجلب بيانات مزايدات مزاد مباشر.
+    Items API يُعيد 404، لذا نستخدم currentLeadingBid من الاستجابة الرئيسية.
     """
-    # 1) استخرج من بيانات المزاد الموجودة أصلاً (بدون طلب إضافي)
     if auction_data:
-        log.info(f"[مباشر] حقول المزاد {auction_id}: {list(auction_data.keys())}")
-        for sold_key in ('soldProductsCount','soldProducts','bidProductsCount',
-                          'closedProductsCount','awardedProductsCount'):
-            v = auction_data.get(sold_key)
-            if v is not None and int(v) > 0:
-                for val_key in ('totalBidValue','totalBidAmount','finalBidAmount',
-                                 'totalAmount','bidTotal','totalAwardedAmount'):
-                    val = _parse_price(auction_data.get(val_key))
-                    if val > 0:
-                        log.info(f"[مباشر] ✓ بيانات مزايدات {auction_id} من الاستجابة الرئيسية:"
-                                 f" sold={v}, value={val}")
-                        return int(v), val
-
-    # 2) جرب مسارات API متعددة
-    headers_mb = {**HEADERS,
-                  'Origin': 'https://mobasher.sa',
-                  'Referer': 'https://mobasher.sa/'}
-    for url in [
-        f"https://discovery-api.prod.mobasher.sa/api/v1/discovery/auctions/{auction_id}/items?pageSize=200",
-        f"https://discovery-api.prod.mobasher.sa/api/v1/discovery/auctions/{auction_id}/lots?pageSize=200",
-        f"https://discovery-api.prod.mobasher.sa/api/v1/discovery/auctions/{auction_id}/products?pageSize=200",
-    ]:
-        try:
-            r = requests.get(url, headers=headers_mb, timeout=15)
-            log.info(f"[مباشر] {url.split('/')[-2]}: HTTP {r.status_code}")
-            if not r.ok:
-                continue
-            d = r.json()
-            log.info(f"[مباشر] استجابة الأصول — keys: {list(d.keys())[:10]}")
-            items = d.get("items") or d.get("lots") or d.get("products") or []
-            if not items:
-                continue
-            log.info(f"[مباشر] عدد الأصول: {len(items)} — أول أصل keys: {list(items[0].keys())[:15]}")
-            sold, total = 0, 0
-            for it in items:
-                bid = _parse_price(
-                    it.get("currentBidAmount") or it.get("highestBidAmount") or
-                    it.get("currentBid") or it.get("highestBid") or
-                    it.get("bidAmount") or it.get("finalBid")
-                )
-                if bid > 0:
-                    sold += 1
-                    total += bid
-            if sold > 0:
-                log.info(f"[مباشر] ✓ {auction_id}: {sold} مباع, قيمة {total}")
-                return sold, total
-        except Exception as e:
-            log.debug(f"[مباشر] خطأ في جلب أصول {auction_id}: {e}")
+        # currentLeadingBid موجود في الاستجابة الرئيسية لمزادات CLOSED
+        leading = _parse_price(auction_data.get("currentLeadingBid") or
+                               auction_data.get("sortPrice"))
+        if leading > 0:
+            log.info(f"[مباشر] ✓ {auction_id}: currentLeadingBid={leading:,}")
+            # currentLeadingBid = إجمالي المزايدات على مستوى المزاد (لا نعرف عدد الأصول المباعة)
+            return 0, leading   # sold_assets=0 لأنه غير متاح، total_value=leading
     return 0, 0
 
 
 def fetch_wasalt_bids(items: list):
-    """يحسب المزايدات من قائمة auctionItems الموجودة في __NEXT_DATA__"""
-    if items:
-        log.info(f"[وصلت] أول أصل — keys: {list(items[0].keys())[:15]}")
+    """
+    يحسب المزايدات من قائمة auctionItems الموجودة في __NEXT_DATA__.
+    auctionItems قد تكون قائمة نصوص (IDs) أو قواميس — نتعامل مع الحالتين.
+    """
+    if not items:
+        return 0, 0
+    # إذا كانت العناصر نصوصاً وليست قواميس — لا بيانات مزايدات متاحة مباشرة
+    if not isinstance(items[0], dict):
+        log.info(f"[وصلت] auctionItems قائمة نصوص، لا بيانات مزايدات مباشرة. نموذج: {str(items[0])[:50]}")
+        return 0, 0
+    # إذا كانت قواميس — استخرج بيانات المزايدات
+    log.info(f"[وصلت] auctionItems قواميس — keys: {list(items[0].keys())[:10]}")
     sold, total = 0, 0
     for it in items:
+        if not isinstance(it, dict):
+            continue
         bid = _parse_price(
             it.get("currentBid") or it.get("highestBid") or
             it.get("currentBidAmount") or it.get("highestBidAmount") or
@@ -763,53 +731,93 @@ def fetch_wasalt_bids(items: list):
 def fetch_saudia_bids(auction_id: str, auction_data: dict = None):
     """
     يجلب بيانات المزايدات لمزاد السعودية للمزادات.
-    يحاول أولاً من بيانات المزاد الموجودة، ثم من API الأصول.
+    جميع endpoints API للمنتجات تُعيد 404، لذا نستخدم HTML scraping
+    من صفحة تفاصيل المزاد مباشرة.
     """
-    # 1) من بيانات المزاد الموجودة
+    # 1) من بيانات المزاد الموجودة — ابحث عن حقول بيانات المزايدات
     if auction_data:
-        log.info(f"[السعودية] حقول المزاد {auction_id}: {list(auction_data.keys())}")
-        for sold_key in ('sold_products','bid_products','awarded_products','sold_count'):
+        for sold_key in ('sold_products', 'bid_products', 'awarded_products', 'sold_count'):
             v = auction_data.get(sold_key)
             if v is not None and int(v) > 0:
-                for val_key in ('total_bid','total_value','bid_total','sold_value','total_amount'):
+                for val_key in ('total_bid', 'total_value', 'bid_total', 'sold_value'):
                     val = _parse_price(auction_data.get(val_key))
                     if val > 0:
                         log.info(f"[السعودية] ✓ بيانات {auction_id} من الاستجابة الرئيسية")
                         return int(v), val
 
-    # 2) جرب عدة مسارات API
-    for url in [
-        f"https://auctions.com.sa/api/get_auction_products?auction_id={auction_id}",
-        f"https://auctions.com.sa/api/get_products?auction_id={auction_id}",
-        f"https://auctions.com.sa/api/auction/{auction_id}/products",
-        f"https://auctions.com.sa/api/auction_products/{auction_id}",
-    ]:
+    # 2) جرب صفحات HTML باستخدام base_url + مسارات شائعة
+    base_url = (auction_data or {}).get("base_url", "")
+    candidate_urls = []
+    if base_url:
+        candidate_urls.append(base_url if base_url.startswith("http")
+                               else f"https://auctions.com.sa{base_url}")
+    candidate_urls += [
+        f"https://auctions.com.sa/auction/{auction_id}",
+        f"https://auctions.com.sa/ar/auction/{auction_id}",
+        f"https://auctions.com.sa/auctions/{auction_id}",
+        f"https://auctions.com.sa/ar/auctions/{auction_id}",
+    ]
+
+    for url in candidate_urls:
         try:
             r = requests.get(url, headers=HEADERS, timeout=15)
-            log.info(f"[السعودية] {url.split('/')[-1].split('?')[0]}: HTTP {r.status_code}")
+            log.info(f"[السعودية] صفحة HTML {url.split('auctions.com.sa')[-1]}: HTTP {r.status_code}")
+            if not r.ok:
+                continue
+            html = r.text
+            # ابحث عن "أعلى سومة" مع القيمة المجاورة
+            patterns = [
+                r'أعلى سومة[^<\d]{0,30}([\d,]+)',
+                r'أعلى مزايدة[^<\d]{0,30}([\d,]+)',
+                r'"current_bid"\s*:\s*"?([\d]+)',
+                r'"highest_bid"\s*:\s*"?([\d]+)',
+                r'"bid_amount"\s*:\s*"?([\d]+)',
+                r'class="[^"]*bid[^"]*"[^>]*>\s*([\d,]+)',
+            ]
+            all_bids = []
+            for pat in patterns:
+                found = re.findall(pat, html)
+                if found:
+                    all_bids = [_parse_price(v) for v in found if _parse_price(v) > 0]
+                    if all_bids:
+                        log.info(f"[السعودية] ✓ وجد {len(all_bids)} مزايدة بنمط: {pat[:30]}")
+                        break
+            if all_bids:
+                return len(all_bids), sum(all_bids)
+        except Exception as e:
+            log.debug(f"[السعودية] خطأ HTML {url}: {e}")
+
+    # 3) جرب API بمعاملات مختلفة
+    api_variants = [
+        f"https://auctions.com.sa/api/get_auction_filter?pathname=%2Fauction%2F{auction_id}&auction_id={auction_id}",
+        f"https://auctions.com.sa/api/get_products_filter?auction_id={auction_id}&state_key=end",
+        f"https://auctions.com.sa/api/get_auction_filter?auction_id={auction_id}&code=real_estate",
+    ]
+    for url in api_variants:
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=10)
+            log.info(f"[السعودية] API variant: HTTP {r.status_code}")
             if not r.ok:
                 continue
             d = r.json()
-            log.info(f"[السعودية] استجابة الأصول — keys: {list(d.keys())[:10]}")
-            products = d.get("data") or d.get("products") or d.get("items") or []
-            if not products:
-                continue
-            log.info(f"[السعودية] عدد الأصول: {len(products)} — أول أصل keys: {list(products[0].keys())[:15]}")
-            sold, total = 0, 0
-            for p in products:
-                bid = _parse_price(
-                    p.get("current_bid") or p.get("highest_bid") or
-                    p.get("last_bid") or p.get("bid_price") or
-                    p.get("bid_amount") or p.get("final_price")
-                )
-                if bid > 0:
-                    sold += 1
-                    total += bid
-            if sold > 0:
-                log.info(f"[السعودية] ✓ {auction_id}: {sold} مباع, قيمة {total}")
-                return sold, total
+            products = d.get("data") or d.get("products") or []
+            if isinstance(products, list) and products:
+                log.info(f"[السعودية] ✓ وجد {len(products)} منتج — keys: {list(products[0].keys())[:10]}")
+                sold, total = 0, 0
+                for p in products:
+                    bid = _parse_price(
+                        p.get("current_bid") or p.get("highest_bid") or
+                        p.get("bid_price") or p.get("bid_amount")
+                    )
+                    if bid > 0:
+                        sold += 1
+                        total += bid
+                if sold > 0:
+                    return sold, total
         except Exception as e:
-            log.debug(f"[السعودية] خطأ في جلب أصول {auction_id}: {e}")
+            log.debug(f"[السعودية] خطأ API variant: {e}")
+
+    log.info(f"[السعودية] تعذّر جلب بيانات مزايدات المزاد {auction_id}")
     return 0, 0
 
 

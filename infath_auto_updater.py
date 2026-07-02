@@ -84,7 +84,7 @@ def _driver():
               "--disable-gpu", "--window-size=1024,600",
               "--disable-extensions", "--disable-plugins",
               "--blink-settings=imagesEnabled=false",
-              "--disable-background-networking", "--disable-default-apps",
+              "--disable-default-apps",
               "--disable-sync", "--mute-audio",
               "--js-flags=--max-old-space-size=128"):
         o.add_argument(a)
@@ -529,10 +529,12 @@ def fetch_aldal(driver):
     now = _ksa_now(); past24 = _past24()
 
     for tab, s in (("running", "live"), ("coming", "soon")):
-        driver.get(f"https://app.aldalauctions.sa/?tab={tab}#auctions"); time.sleep(3)
+        driver.get(f"https://app.aldalauctions.sa/?tab={tab}#auctions"); time.sleep(6)
         for c in driver.find_elements(By.CSS_SELECTOR, ".cards-wrapper .card"):
-            imgs = [i.get_attribute("src") or "" for i in c.find_elements(By.TAG_NAME, "img")]
-            if not any("68a4ccae1afb6" in x for x in imgs): continue
+            # استخدم outerHTML بدل img.getAttribute لأن imagesEnabled=false
+            # قد يُفرغ img.src حتى لو src موجود في HTML
+            card_html = c.get_attribute("outerHTML") or ""
+            if "68a4ccae1afb6" not in card_html: continue
             m   = re.search(r"الأصول\s*(\d+)", c.text)
             try:   lnk = c.find_element(By.TAG_NAME, "a").get_attribute("href") or ""
             except: lnk = ""
@@ -549,7 +551,7 @@ def fetch_aldal(driver):
             ))
 
     # منتهية
-    driver.get("https://app.aldalauctions.sa/?tab=ended#auctions"); time.sleep(3)
+    driver.get("https://app.aldalauctions.sa/?tab=ended#auctions"); time.sleep(6)
     for c in driver.find_elements(By.CSS_SELECTOR, ".cards-wrapper .card"):
         imgs = [i.get_attribute("src") or "" for i in c.find_elements(By.TAG_NAME, "img")]
         if not any("68a4ccae1afb6" in x for x in imgs): continue
@@ -608,7 +610,7 @@ def fetch_soum(driver):
     now = _ksa_now(); past24 = _past24()
 
     for sp, s in (("ongoing", "live"), ("upcoming", "soon"), ("ended", "ended")):
-        driver.get(f"https://soum.tech/auctions?status={sp}"); time.sleep(4)
+        driver.get(f"https://soum.tech/auctions?status={sp}"); time.sleep(7)
         cards = driver.find_elements(By.TAG_NAME, "article")
         for c in cards:
             html = c.get_attribute("innerHTML") or ""

@@ -1,18 +1,21 @@
 """
-محدّث آلي — لوحة متابعة مزادات إنفاذ  v8
+محدّث آلي — لوحة متابعة مزادات إنفاذ  v9
 ==========================================
-جميع الإصلاحات مبنية على فحص ميداني مباشر في المتصفح.
+الاكتشاف الجوهري في v9:
+  - الدال وسومتك كلاهما SSR (Server-Side Rendered)
+  - بياناتهما موجودة في HTML الأولي — لا حاجة لـ Selenium للقوائم
+  - سومتك: inline <script> يحتوي كل البيانات (name,assets,highestPrice,bidsCount)
+  - الدال: HTML يحتوي الشارة والـ IDs — requests + /api/auction/{id} للاسم
+  - Selenium متبقٍ فقط لـ: مباشر/وصلت المنتهية + الدال المنتهية (بيانات مزايدات)
 
-المنصة    │ قائمة المزادات           │ بيانات المزايدات (للمنتهية)
-──────────┼──────────────────────────┼────────────────────────────────────────────
-مباشر     │ Discovery API            │ /auctions/t-details/{id} — requests أولاً
-وصلت      │ __NEXT_DATA__ SSR        │ /auction-group/{id} HTML — Selenium
-السعودية  │ get_auction_filter       │ oe.auctions.com.sa/api/get_product_filter
-          │                          │ حقل max_bid بدون login (مؤكد ميدانياً ✅)
-دار       │ /edge/v1/auctions        │ is_infath==1 + current_price + is_sold
-          │ is_infath == 1 حصراً     │ (إصلاح: string search خطأ - يُطابق اسم الـ key)
-الدال     │ Selenium + CDP bypass    │ /api/auction/{id} → title_ar
-سومتك     │ Selenium + CDP bypass    │ /auctions/{id}/assets — "أعلى سومة"
+المنصة    │ قائمة                    │ بيانات المزايدات
+──────────┼──────────────────────────┼──────────────────────────────────
+مباشر     │ Discovery API (requests) │ /t-details/{id} requests→Selenium
+وصلت      │ __NEXT_DATA__ (requests) │ /auction-group HTML (Selenium)
+السعودية  │ get_auction_filter       │ oe.auctions.com.sa/get_product_filter
+دار       │ /edge/v1/auctions REST   │ current_price + is_sold
+الدال     │ HTML tabs (requests) ✅  │ Selenium للمنتهية فقط
+سومتك     │ inline script (requests) │ highestPrice + bidsCount في script ✅
 """
 
 import gc, json, time, re, os, logging, argparse
@@ -65,11 +68,11 @@ def _p(v) -> int:
 def _ksa_now():  return datetime.now(KSA)
 def _past24():   return _ksa_now() - timedelta(hours=24)
 def _is_ar(s: str) -> bool:
-    return bool(s) and any('\u0600' <= c <= '\u06ff' for c in s)
+    return bool(s) and any("\u0600" <= c <= "\u06ff" for c in s)
 
 
 # ──────────────────────────────────────────────
-# Selenium Driver — موفر للذاكرة + إخفاء webdriver
+# Selenium Driver
 # ──────────────────────────────────────────────
 def _driver():
     from selenium import webdriver
@@ -373,8 +376,6 @@ def fetch_saudia():
             link="https://auctions.com.sa/auctions_filter",
         ))
     log.info(f"[السعودية] ✓ {len(out)} مزاد إنفاذ")
-
-    # إثراء المنتهية ببيانات المزايدات بدون Selenium
     for auc in [a for a in out if a.status == "ended"]:
         try: _saudia_enrich(auc)
         except Exception as e: log.debug(f"[السعودية] enrich {auc.id}: {e}")
@@ -383,20 +384,13 @@ def fetch_saudia():
 
 def _saudia_enrich(auc: Auction):
     """
-    يجلب بيانات مزايدات السعودية من:
-    oe.auctions.com.sa/api/get_product_filter?state_key=end&categ_ids=4
-
-    مؤكد ميدانياً 2 يوليو 2026:
-    - API عام بدون تسجيل دخول
-    - max_bid = "أعلى مزايدة" الظاهر في الصفحة
-    - state=="done" + max_bid>0 = أصل مباع
-    - مثال: استثمار القصيم → 3 أصول مباعة، 2,163,000 ر.س
+    oe.auctions.com.sa/api/get_product_filter
+    max_bid + state==done — بدون login (مؤكد ميدانياً)
     """
     auction_id   = int(auc.id)
     target_count = auc.assets
     sold, total, found = 0, 0, 0
     page = 1
-
     while page <= 80:
         try:
             r = requests.get(
@@ -419,7 +413,6 @@ def _saudia_enrich(auc: Auction):
         except Exception as e:
             log.debug(f"[السعودية] page {page}: {e}")
             break
-
     if sold > 0:
         auc.sold_assets = sold; auc.total_value = total
         log.info(f"[السعودية] ✓ {auc.name[:30]}: {sold}/{found} مباع | {total:,} ر.س")
@@ -428,8 +421,7 @@ def _saudia_enrich(auc: Auction):
 
 
 # ══════════════════════════════════════════════════════════════
-# دار المزادات — REST API
-# إصلاح: is_infath==1 حصراً (string search خطأ يُطابق اسم الـ key)
+# دار المزادات
 # ══════════════════════════════════════════════════════════════
 def fetch_dar():
     log.info("[دار] /edge/v1/auctions (is_infath==1)...")
@@ -458,7 +450,7 @@ def fetch_dar():
             ev  = a.get("event") or {}
             eid = ev.get("id")
             if not eid: continue
-            if not bool(ev.get("is_infath")): continue   # ✅ صارم
+            if not bool(ev.get("is_infath")): continue
             if eid not in events:
                 events[eid] = {
                     "name":   (ev.get("name") or {}).get("ar") or f"مزاد دار {eid}",
@@ -503,12 +495,12 @@ def fetch_dar():
     out = (_group(_assets("ongoing"),  "live") +
            _group(_assets("upcoming"), "soon") +
            _group(_assets("ended"),    "ended"))
-    log.info(f"[دار] ✓ {len(out)} مزاد إنفاذ (is_infath==1)")
+    log.info(f"[دار] ✓ {len(out)} مزاد إنفاذ")
     return out
 
 
 # ══════════════════════════════════════════════════════════════
-# الدال — Selenium + CDP bypass
+# الدال — requests للقوائم + Selenium للمنتهية فقط
 # ══════════════════════════════════════════════════════════════
 def _aldal_name(auction_id: str) -> str:
     try:
@@ -524,31 +516,69 @@ def _aldal_name(auction_id: str) -> str:
     return f"مزاد الدال {auction_id}"
 
 
-def fetch_aldal(driver):
-    log.info("[الدال] Selenium...")
-    By  = __import__("selenium.webdriver.common.by", fromlist=["By"]).By
+def _aldal_parse_html(html: str, status: str) -> list:
+    """
+    يستخرج مزادات إنفاذ من HTML الدال (SSR).
+    البيانات موجودة في HTML الأولي — لا حاجة لـ Selenium.
+    """
+    out    = []
+    parts  = re.split(r'(?=<div[^>]+class="card[\s"])', html)
+    for card in parts:
+        if "68a4ccae1afb6" not in card: continue
+        m_id    = re.search(r'/auction/(\d+)', card)
+        if not m_id: continue
+        auc_id  = m_id.group(1)
+        # عدد الأصول: النص بعد "الأصول"
+        assets_text = card.split("الأصول")[1] if "الأصول" in card else ""
+        assets  = _p(re.search(r'(\d+)', assets_text)) if assets_text else 0
+        # تاريخ البدء
+        m_date  = re.search(r'(\d{4}/\d{2}/\d{2})', card)
+        start   = m_date.group(1).replace("/", "-") if m_date else ""
+        out.append(Auction(
+            id=f"AL-{auc_id}", platform="aldal",
+            name=_aldal_name(auc_id),
+            city="", status=status, assets=assets,
+            start=start,
+            link=f"https://app.aldalauctions.sa/auction/{auc_id}",
+            detail_link=f"https://app.aldalauctions.sa/auction/{auc_id}",
+        ))
+    return out
+
+
+def fetch_aldal(driver=None):
+    log.info("[الدال] requests (SSR)...")
     out = []
     now = _ksa_now(); past24 = _past24()
 
+    # ── الجارية والقادمة: requests مباشرة ──
     for tab, s in (("running", "live"), ("coming", "soon")):
-        driver.get(f"https://app.aldalauctions.sa/?tab={tab}#auctions")
-        time.sleep(6)
-        for c in driver.find_elements(By.CSS_SELECTOR, ".cards-wrapper .card"):
-            card_html = c.get_attribute("outerHTML") or ""
-            if "68a4ccae1afb6" not in card_html: continue
-            m    = re.search(r"الأصول\s*(\d+)", c.text)
-            try:   lnk = c.find_element(By.TAG_NAME, "a").get_attribute("href") or ""
-            except: lnk = ""
-            m_id = re.search(r"/auction/(\d+)", lnk or "")
-            auc_id = m_id.group(1) if m_id else str(abs(hash(lnk)) % 10000)
-            out.append(Auction(
-                id=f"AL-{auc_id}", platform="aldal",
-                name=_aldal_name(auc_id), city="", status=s,
-                assets=int(m.group(1)) if m else 0,
-                link=lnk or f"https://app.aldalauctions.sa/?tab={tab}#auctions",
-                detail_link=lnk,
-            ))
+        try:
+            r = requests.get(
+                f"https://app.aldalauctions.sa/?tab={tab}#auctions",
+                headers=H, timeout=15)
+            if r.ok:
+                auctions = _aldal_parse_html(r.text, s)
+                out.extend(auctions)
+                log.info(f"[الدال] tab={tab}: {len(auctions)} مزاد إنفاذ")
+        except Exception as e:
+            log.error(f"[الدال] tab={tab}: {e}")
 
+    # ── المنتهية: Selenium فقط لبيانات المزايدات ──
+    if driver:
+        try:
+            ended = _aldal_fetch_ended(driver, now, past24)
+            out.extend(ended)
+        except Exception as e:
+            log.error(f"[الدال] ended: {e}")
+
+    log.info(f"[الدال] ✓ {len(out)} مزاد إنفاذ")
+    return out
+
+
+def _aldal_fetch_ended(driver, now, past24) -> list:
+    """Selenium للدال المنتهية فقط — لجلب بيانات المزايدات"""
+    By  = __import__("selenium.webdriver.common.by", fromlist=["By"]).By
+    out = []
     driver.get("https://app.aldalauctions.sa/?tab=ended#auctions")
     time.sleep(6)
     for c in driver.find_elements(By.CSS_SELECTOR, ".cards-wrapper .card"):
@@ -593,65 +623,109 @@ def fetch_aldal(driver):
             link=lnk or "https://app.aldalauctions.sa/?tab=ended#auctions",
             detail_link=lnk, sold_assets=sold, total_value=total,
         ))
-    log.info(f"[الدال] ✓ {len(out)} مزاد إنفاذ")
     return out
 
 
 # ══════════════════════════════════════════════════════════════
-# سومتك — Selenium + CDP bypass
+# سومتك — requests كامل (SSR inline script)
+#
+# الاكتشاف: isInfath:true وكل البيانات في <script> الأولي
+# noOfAuctions = عدد الأصول في المجموعة (مؤكد من المستخدم)
+# highestPrice + bidsCount = بيانات المزايدات
 # ══════════════════════════════════════════════════════════════
-def fetch_soum(driver):
-    log.info("[سومتك] Selenium...")
-    By  = __import__("selenium.webdriver.common.by", fromlist=["By"]).By
+def _soum_parse(html: str, s: str, now, past24) -> list:
+    """يستخرج مزادات إنفاذ من inline script سومتك"""
+    out     = []
+    seen    = set()
+    pos     = 0
+
+    while (pos := html.find("isInfath:true", pos)) != -1:
+        # حدود الـ object
+        start, depth = -1, 0
+        for i in range(pos - 1, max(0, pos - 2000), -1):
+            if html[i] == "}": depth += 1
+            elif html[i] == "{":
+                if depth == 0: start = i; break
+                depth -= 1
+        end, d2 = -1, 0
+        if start >= 0:
+            for i in range(start, min(start + 2000, len(html))):
+                if html[i] == "{": d2 += 1
+                elif html[i] == "}":
+                    d2 -= 1
+                    if d2 == 0: end = i; break
+
+        if start >= 0 and end >= 0:
+            obj = html[start:end + 1]
+            m_id = re.search(r'\bid:(\d+)', obj)
+            if m_id and m_id.group(1) not in seen:
+                seen.add(m_id.group(1))
+                aid         = m_id.group(1)
+                m_name      = re.search(r'\bname:"([^"]+)"', obj)
+                m_city      = re.search(r'\bcityName:"([^"]+)"', obj)
+                m_start     = re.search(r'\bstartDate:"([^"]+)"', obj)
+                m_end       = re.search(r'\bendDate:"([^"]+)"', obj)
+                m_highest   = re.search(r'\bhighestPrice:(\d+)', obj)
+                m_bids      = re.search(r'\bbidsCount:(\d+)', obj)
+                m_assets    = re.search(r'\bnoOfAuctions:(\d+)', obj)
+
+                ea   = ""
+                sold = 0
+                total= 0
+
+                if s == "ended":
+                    end_str = m_end.group(1) if m_end else ""
+                    if end_str:
+                        try:
+                            ed = datetime.strptime(end_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=KSA)
+                            if not (past24 <= ed <= now):
+                                pos += 10; continue
+                            ea = ed.strftime("%d %b — %I:%M %p")
+                        except:
+                            pos += 10; continue
+                    bids_n    = int(m_bids.group(1))    if m_bids    else 0
+                    highest_n = _p(m_highest.group(1))  if m_highest else 0
+                    if bids_n > 0 and highest_n > 0:
+                        sold  = 1          # أقل تقدير — المزاد يحتوي مزايدة
+                        total = highest_n  # أعلى سومة على المجموعة
+
+                out.append(Auction(
+                    id=f"SO-{aid}", platform="soum",
+                    name=m_name.group(1) if m_name else f"مزاد سومتك {aid}",
+                    city=m_city.group(1) if m_city else "",
+                    status=s,
+                    assets=_p(m_assets.group(1)) if m_assets else 1,
+                    start=(m_start.group(1) if m_start else "")[:10],
+                    end=(m_end.group(1) if m_end else "")[:10],
+                    end_iso=(m_end.group(1) if m_end else "")[:10] + "T00:00:00+03:00",
+                    ended_at=ea,
+                    link=f"https://soum.tech/auctions/{aid}",
+                    detail_link=f"https://soum.tech/auctions/{aid}/assets",
+                    sold_assets=sold,
+                    total_value=total,
+                ))
+        pos += 10
+
+    return out
+
+
+def fetch_soum():
+    log.info("[سومتك] requests (SSR inline script)...")
     out = []
     now = _ksa_now(); past24 = _past24()
 
     for sp, s in (("ongoing", "live"), ("upcoming", "soon"), ("ended", "ended")):
-        driver.get(f"https://soum.tech/auctions?status={sp}")
-        time.sleep(7)
-        cards = driver.find_elements(By.TAG_NAME, "article")
-        for c in cards:
-            html = c.get_attribute("innerHTML") or ""
-            if "نفاذ" not in html and "Infath" not in html: continue
-            try:   title = c.find_element(By.CSS_SELECTOR, "h2,h3").text.strip()
-            except: title = ""
-            if not title: title = "مزاد سومتك"
-            m_a = re.search(r"الأصول\s*(\d+)", c.text)
-            try:   raw_lnk = c.find_element(By.TAG_NAME, "a").get_attribute("href") or ""
-            except: raw_lnk = ""
-            m_id   = re.search(r"/auctions/(\d+)", raw_lnk)
-            auc_id = m_id.group(1) if m_id else str(abs(hash(title)) % 100000)
-            assets = int(m_a.group(1)) if m_a else 0
-            ea = ""; sold = 0; total = 0
+        try:
+            r = requests.get(
+                f"https://soum.tech/auctions?status={sp}",
+                headers=H, timeout=15)
+            if not r.ok: continue
+            parsed = _soum_parse(r.text, s, now, past24)
+            out.extend(parsed)
+            log.info(f"[سومتك] {sp}: {len(parsed)} مزاد إنفاذ")
+        except Exception as e:
+            log.error(f"[سومتك] {sp}: {e}")
 
-            if s == "ended":
-                m_d = re.search(r"(\d{4}-\d{2}-\d{2})", c.text)
-                if m_d:
-                    try:
-                        ed = datetime.strptime(m_d.group(1), "%Y-%m-%d").replace(tzinfo=KSA)
-                        if not (past24 <= ed <= now): continue
-                        ea = ed.strftime("%d %b")
-                    except: pass
-                try:
-                    txt  = _page_text(driver, f"https://soum.tech/auctions/{auc_id}/assets", wait=5)
-                    bids = [_p(v) for v in re.findall(r"أعلى سومة\s*[\n\s]*([\d,]+)", txt)]
-                    if not bids:
-                        bids = [_p(v) for v in re.findall(r"([\d,]{5,})\s*ر\.?س", txt)]
-                    sold  = sum(1 for b in bids if b > 0)
-                    total = sum(b for b in bids if b > 0)
-                    _clear_page(driver)
-                    if sold:
-                        log.info(f"[سومتك] ✓ {title[:30]}: {sold} مباع | {total:,} ر.س")
-                except Exception as e:
-                    log.debug(f"[سومتك] assets: {e}")
-
-            out.append(Auction(
-                id=f"SO-{auc_id}", platform="soum",
-                name=title, city="", status=s, assets=assets, ended_at=ea,
-                link=raw_lnk or f"https://soum.tech/auctions?status={sp}",
-                detail_link=f"https://soum.tech/auctions/{auc_id}/assets",
-                sold_assets=sold, total_value=total,
-            ))
     log.info(f"[سومتك] ✓ {len(out)} مزاد إنفاذ")
     return out
 
@@ -686,16 +760,15 @@ def build_payload(all_auctions):
 
 
 # ══════════════════════════════════════════════════════════════
-# الدورة الرئيسية — 3 sessions Chrome منفصلة
+# الدورة الرئيسية — Session واحدة فقط بدل ثلاثة
 # ══════════════════════════════════════════════════════════════
 def run_update(use_selenium=True, output_file="infath_data.json"):
     log.info("═" * 60)
-    log.info("بدء دورة تحديث | ٦ منصات | إنفاذ  v8")
+    log.info("بدء دورة تحديث | ٦ منصات | إنفاذ  v9")
     log.info("═" * 60)
     all_auctions = []
 
-    # مرحلة 1: APIs السريعة بدون Chrome
-    # مباشر/وصلت (قوائم فقط) + دار (كامل) + السعودية (قائمة + مزايدات بدون Selenium!)
+    # مرحلة 1: APIs + requests (بدون Chrome)
     for fn in (fetch_mobasher, fetch_wasalt):
         try: all_auctions.extend(fn(driver=None))
         except Exception as e: log.error(f"✗ {fn.__name__}: {e}")
@@ -706,39 +779,41 @@ def run_update(use_selenium=True, output_file="infath_data.json"):
     try: all_auctions.extend(fetch_dar())
     except Exception as e: log.error(f"✗ fetch_dar: {e}")
 
+    # الدال: requests للقوائم (بدون driver)
+    try: all_auctions.extend(fetch_aldal(driver=None))
+    except Exception as e: log.error(f"✗ fetch_aldal (list): {e}")
+
+    # سومتك: requests كامل (لا Selenium)
+    try: all_auctions.extend(fetch_soum())
+    except Exception as e: log.error(f"✗ fetch_soum: {e}")
+
     if not use_selenium:
-        log.info("تخطي الدال وسومتك وإثراء مباشر/وصلت (--no-selenium)")
+        log.info("تخطي إثراء المنتهية (--no-selenium)")
     else:
-        # Session 1: إثراء مباشر ووصلت المنتهية
-        ended_api = [a for a in all_auctions
+        # Session 1 — الوحيدة: إثراء مباشر/وصلت المنتهية + الدال المنتهية
+        ended_web = [a for a in all_auctions
                      if a.status == "ended" and a.platform in ("mobasher", "wasalt")]
-        if ended_api:
-            log.info(f"[Session-1] إثراء {len(ended_api)} مزاد (مباشر/وصلت)...")
-            d1 = _driver()
+        has_aldal_ended = True  # الدال المنتهية دائماً تحتاج Selenium
+
+        log.info("[Session-1] مباشر/وصلت إثراء + الدال منتهية...")
+        d1 = _driver()
+        try:
+            for auc in ended_web:
+                try:
+                    if auc.platform == "mobasher": _mobasher_enrich(d1, auc)
+                    elif auc.platform == "wasalt":  _wasalt_enrich(d1, auc)
+                except Exception as e:
+                    log.debug(f"[S1] {auc.platform}/{auc.id}: {e}")
+            # الدال المنتهية (بيانات مزايدات)
             try:
-                for auc in ended_api:
-                    try:
-                        if auc.platform == "mobasher": _mobasher_enrich(d1, auc)
-                        elif auc.platform == "wasalt":  _wasalt_enrich(d1, auc)
-                    except Exception as e:
-                        log.debug(f"[S1] {auc.platform}/{auc.id}: {e}")
-            finally:
-                d1.quit(); gc.collect()
-                log.info("[Session-1] ✓ Chrome أُغلق")
-
-        # Session 2: الدال
-        log.info("[Session-2] الدال...")
-        d2 = _driver()
-        try:    all_auctions.extend(fetch_aldal(d2))
-        except Exception as e: log.error(f"✗ fetch_aldal: {e}")
-        finally: d2.quit(); gc.collect(); log.info("[Session-2] ✓ Chrome أُغلق")
-
-        # Session 3: سومتك
-        log.info("[Session-3] سومتك...")
-        d3 = _driver()
-        try:    all_auctions.extend(fetch_soum(d3))
-        except Exception as e: log.error(f"✗ fetch_soum: {e}")
-        finally: d3.quit(); gc.collect(); log.info("[Session-3] ✓ Chrome أُغلق")
+                ended_aldal = _aldal_fetch_ended(d1, _ksa_now(), _past24())
+                all_auctions.extend(ended_aldal)
+                log.info(f"[الدال] ended: {len(ended_aldal)} مزاد")
+            except Exception as e:
+                log.error(f"✗ aldal_ended: {e}")
+        finally:
+            d1.quit(); gc.collect()
+            log.info("[Session-1] ✓ Chrome أُغلق")
 
     payload = build_payload(all_auctions)
     tmp = output_file + ".tmp"
